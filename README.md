@@ -3,6 +3,20 @@
 This extension runs the Koshka language server and formatter. The server is
 part of the shell binary.
 
+## Installing a release
+
+Download `kosh.vsix` from the
+[releases](https://github.com/fennec-support/kosh-vscode/releases) page and
+run:
+
+```bash
+code --install-extension kosh.vsix
+```
+
+The extension needs the `kosh` binary. It uses `kosh.path`, then `PATH`, and
+otherwise offers to download the newest release of
+[fennec-support/kosh](https://github.com/fennec-support/kosh).
+
 ## Building and installing
 
 ```bash

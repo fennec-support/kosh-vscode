@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc -p ./ --noEmit
+
+      - name: Compile
+        run: npm run compile
+
+      - name: Package
+        run: npx @vscode/vsce package --out kosh.vsix
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kosh-vsix
+          path: kosh.vsix
+          if-no-files-found: error
