@@ -14,8 +14,8 @@ jobs:
     env:
       TAG: ${{ github.ref_name }}
       GH_TOKEN: ${{ github.token }}
-      VSCE_PAT: ${{ secrets.VSCE_PAT }}
-      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+      HAS_VSCE_PAT: ${{ secrets.VSCE_PAT != '' }}
+      HAS_OVSX_PAT: ${{ secrets.OVSX_PAT != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -52,9 +52,13 @@ jobs:
           fi
 
       - name: Publish to the Visual Studio Marketplace
-        if: env.VSCE_PAT != ''
+        if: env.HAS_VSCE_PAT == 'true'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: npx @vscode/vsce publish --packagePath kosh.vsix
 
       - name: Publish to Open VSX
-        if: env.OVSX_PAT != ''
-        run: npx --yes ovsx publish kosh.vsix
+        if: env.HAS_OVSX_PAT == 'true'
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: npx --yes ovsx@1.2.0 publish kosh.vsix
