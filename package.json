@@ -1,8 +1,8 @@
 {
   "name": "kosh",
-  "displayName": "Koshka Shell Toolkit",
-  "description": "Koshka LSP and utilties for Shell, Bash and CI scripts",
-  "version": "0.1.0",
+  "displayName": "Koshka Integration",
+  "description": "Shell and Bash language server powered by Koshka",
+  "version": "0.1.1",
   "publisher": "fluffyfen",
   "license": "BSD-3-Clause",
   "repository": {

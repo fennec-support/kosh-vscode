@@ -8,7 +8,11 @@ Currently that includes:
 - LSP/Symbols
 - Formatter
 
-You should probably install this extension from the Extension Marketplace.
+You should probably install this extension from the [marketplace](https://marketplace.visualstudio.com/items?itemName=fluffyfen.kosh).
+
+| kosh lsp in action. |
+| - |
+| <img src="assets/screenshot.png" width=99%/> |
 
 ### Installing a release
 
