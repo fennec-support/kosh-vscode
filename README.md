@@ -32,6 +32,13 @@ npm run package
 code --install-extension kosh.vsix
 ```
 
+### Updates
+
+Once per session the extension compares the version printed by
+`kosh --version` with the newest release. It offers to update the binary it
+downloaded itself, and only notifies you when `kosh.path` or PATH holds an
+older one.
+
 ### Settings
 
 The values below are the defaults.

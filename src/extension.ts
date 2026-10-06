@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -15,6 +16,8 @@ const DEFAULT_BINARY_NAME = "kosh";
 const RELEASES_URL =
   "https://api.github.com/repos/fennec-support/kosh/releases?per_page=10";
 const SKIP_PROMPT_KEY = "kosh.skipDownloadPrompt";
+const NOTIFIED_VERSION_KEY = "kosh.notifiedLatestVersion";
+const VERSION_PROBE_TIMEOUT_MS = 5000;
 
 /*
  * Koshka reads a language identifier it does not recognize as a plain shell
@@ -61,7 +64,14 @@ interface Release {
   assets: ReleaseAsset[];
 }
 
+interface Version {
+  numbers: number[];
+  is_prerelease: boolean;
+}
+
 let client: LanguageClient | undefined;
+let releases_request: Promise<Release[]> | undefined;
+let did_check_version = false;
 
 function get_configuration(): vscode.WorkspaceConfiguration {
   return vscode.workspace.getConfiguration(CONFIGURATION_SECTION);
@@ -165,16 +175,7 @@ function select_release_asset(
   return undefined;
 }
 
-/*
- * The release list is read, and the newest release with an asset for this
- * platform is used. Drafts and prereleases are skipped.
- */
-async function download_release_binary(
-  context: vscode.ExtensionContext,
-  progress: vscode.Progress<{ message?: string }>,
-): Promise<{ tag: string; temporary_path: string }> {
-  progress.report({ message: "Reading the release list" });
-
+async function request_releases(): Promise<Release[]> {
   const releases_response = await fetch(RELEASES_URL, {
     headers: {
       Accept: "application/vnd.github+json",
@@ -188,7 +189,96 @@ async function download_release_binary(
     );
   }
 
-  const releases = (await releases_response.json()) as Release[];
+  return (await releases_response.json()) as Release[];
+}
+
+/*
+ * The release list is read once per activation. A failed read is not kept.
+ */
+function fetch_releases(): Promise<Release[]> {
+  if (releases_request === undefined) {
+    const request = request_releases();
+
+    releases_request = request;
+    request.catch(() => {
+      if (releases_request === request) {
+        releases_request = undefined;
+      }
+    });
+  }
+
+  return releases_request;
+}
+
+/*
+ * A release tag or the first line of the version output is read as dotted
+ * numbers. A suffix after a slash is dropped, and a suffix after a hyphen marks
+ * a prerelease.
+ */
+function parse_version(text: string): Version | undefined {
+  const match = /(\d+(?:\.\d+)*)(-[0-9A-Za-z.-]+)?/.exec(text);
+
+  if (match === null) {
+    return undefined;
+  }
+
+  return {
+    numbers: match[1].split(".").map(Number),
+    is_prerelease: match[2] !== undefined,
+  };
+}
+
+function compare_versions(left: Version, right: Version): number {
+  const length = Math.max(left.numbers.length, right.numbers.length);
+
+  for (let index = 0; index < length; index++) {
+    const difference =
+      (left.numbers[index] ?? 0) - (right.numbers[index] ?? 0);
+
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+
+  return Number(right.is_prerelease) - Number(left.is_prerelease);
+}
+
+function read_binary_version(binary_path: string): Promise<Version | undefined> {
+  return new Promise((resolve) => {
+    execFile(
+      binary_path,
+      ["--version"],
+      {
+        timeout: VERSION_PROBE_TIMEOUT_MS,
+        env: { ...process.env, NO_COLOR: "1" },
+      },
+      (error, stdout) => {
+        if (error !== null) {
+          resolve(undefined);
+
+          return;
+        }
+
+        const first_line = stdout.toString().split(/\r?\n/, 1)[0];
+        const field = first_line.trim().split(/\s+/).pop() ?? "";
+
+        resolve(parse_version(field));
+      },
+    );
+  });
+}
+
+/*
+ * The release list is read, and the newest release with an asset for this
+ * platform is used. Drafts and prereleases are skipped.
+ */
+async function download_release_binary(
+  context: vscode.ExtensionContext,
+  progress: vscode.Progress<{ message?: string }>,
+): Promise<{ tag: string; temporary_path: string }> {
+  progress.report({ message: "Reading the release list" });
+
+  const releases = await fetch_releases();
   const selection = select_release_asset(releases);
 
   if (selection === undefined) {
@@ -288,6 +378,104 @@ async function offer_download(context: vscode.ExtensionContext): Promise<void> {
   }
 }
 
+async function offer_update(
+  context: vscode.ExtensionContext,
+  installed_tag: string,
+  latest_tag: string,
+): Promise<void> {
+  if (context.globalState.get<boolean>(SKIP_PROMPT_KEY, false)) {
+    return;
+  }
+
+  const update_action = "Update";
+  const skip_action = "Never ask again";
+
+  const selection = await vscode.window.showWarningMessage(
+    `The kosh binary of the extension is ${installed_tag}, and the latest` +
+      ` release is ${latest_tag}.`,
+    update_action,
+    skip_action,
+  );
+
+  if (selection === update_action) {
+    await download_and_restart(context);
+
+    return;
+  }
+
+  if (selection === skip_action) {
+    await context.globalState.update(SKIP_PROMPT_KEY, true);
+  }
+}
+
+async function notify_outdated_binary(
+  context: vscode.ExtensionContext,
+  binary_path: string,
+  installed_tag: string,
+  latest_tag: string,
+): Promise<void> {
+  if (context.globalState.get<string>(NOTIFIED_VERSION_KEY) === latest_tag) {
+    return;
+  }
+
+  await context.globalState.update(NOTIFIED_VERSION_KEY, latest_tag);
+  vscode.window.showInformationMessage(
+    `The kosh binary at ${binary_path} is ${installed_tag}, and the latest` +
+      ` release is ${latest_tag}.`,
+  );
+}
+
+/*
+ * The check runs once per activation. A binary in the storage of the extension
+ * is updated, and any other binary is only reported. A failed probe or an
+ * unreachable release list ends the check silently.
+ */
+async function check_binary_version(
+  context: vscode.ExtensionContext,
+  binary_path: string,
+): Promise<void> {
+  if (did_check_version) {
+    return;
+  }
+
+  did_check_version = true;
+
+  try {
+    const installed = await read_binary_version(binary_path);
+
+    if (installed === undefined) {
+      return;
+    }
+
+    const selection = select_release_asset(await fetch_releases());
+    const latest =
+      selection === undefined ? undefined : parse_version(selection.tag);
+
+    if (selection === undefined || latest === undefined) {
+      return;
+    }
+
+    if (compare_versions(installed, latest) >= 0) {
+      return;
+    }
+
+    const installed_tag = installed.numbers.join(".");
+
+    if (binary_path === get_downloaded_binary_path(context)) {
+      await offer_update(context, installed_tag, selection.tag);
+    } else {
+      await notify_outdated_binary(
+        context,
+        binary_path,
+        installed_tag,
+        selection.tag,
+      );
+    }
+  } catch {
+    return;
+  }
+}
+
 /*
  * The server option is placed after the user arguments. The shell rejects it
  * next to a command string, a script operand, or another mode, and a mistaken
@@ -343,6 +531,8 @@ async function start_client(context: vscode.ExtensionContext): Promise<void> {
   );
 
   await client.start();
+
+  void check_binary_version(context, binary_path);
 }
 
 async function stop_client(): Promise<void> {
