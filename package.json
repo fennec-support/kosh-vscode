@@ -5,6 +5,7 @@
   "version": "0.1.1",
   "publisher": "fluffyfen",
   "license": "BSD-3-Clause",
+  "icon": "icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/fennec-support/kosh-vscode"
