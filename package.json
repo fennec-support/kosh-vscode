@@ -1,7 +1,7 @@
 {
   "name": "kosh",
-  "displayName": "Koshka",
-  "description": "Shell diagnostics, completion, and formatting from the Koshka shell.",
+  "displayName": "Koshka Shell Toolkit",
+  "description": "Koshka LSP and utilties for Shell, Bash and CI scripts",
   "version": "0.1.0",
   "publisher": "toiletbril",
   "license": "BSD-3-Clause",
